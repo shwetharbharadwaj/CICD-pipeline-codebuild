@@ -1,0 +1,113 @@
+# Professional IaC template
+# Includes automatic rollback on errors
+# Environment-based deployments
+# CloudWatch monitoring
+# Resource tagging
+
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Serverless CI/CD pipeline- Production Grade Lambda Deployment
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      -dev
+      -staging
+      -prod
+    Description: Deployment environment
+
+    Version:
+      Type: String
+      Default: '1.0.0'
+      Description: Application Version
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: python3.9
+    Environment:
+      Variables:
+      ENVIRONMENT: !Ref Environment
+      VERSION: !Ref Version
+
+Resources:
+  ServerlessFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'cicd-demo-${Environment}'
+      Handler: lambda_function.lambda_function
+      CodeUri: .
+      Description: CI/CD Pipeline Demo Function
+      Architectures:
+      - x86_64
+      Tags:
+        Project: CICD-Pipeline
+        Environment: !Ref Environment
+        ManagedBy: CloudFormation
+
+
+AutoPublishAlias: live
+DeploymentPreference: 
+  Type: AllAtOnce
+  Alarms:
+    - !Ref FunctionErrorsAlarm
+
+#IAM permissions
+
+Policies:
+  - Version: '2012-10-17'
+    Statement:
+      - Effect: Allow
+        Action:
+        - logs:CreateLogGroup
+        - logs:CreateLogStream
+        - logs:PutLogEvents
+        Resource: '*'
+
+
+#CloudWatch Alarm for automatic rollback
+
+FunctionErrorsAlarm:
+  Type: AWS::CloudWatch::Alarm
+  Properties:
+      AlarmName: !Sub 'cicd-demo-${Environment}-errors'
+      AlarmDescription: Triggers rollback if error rate is too high
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref ServerlessFunction
+      TreatMissingData: notBreaching
+
+# CloudWatch Log Group
+  FunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/cicd-demo-${Environment}'
+      RetentionInDays: 7
+
+Outputs:
+  FunctionArn:
+    Description: Lambda Function ARN
+    Value: !GetAtt ServerlessFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionArn'
+
+FunctionName:
+    Description: Lambda Function Name
+    Value: !Ref ServerlessFunction
+    Export:
+      Name: !Sub '${AWS::StackName}-FunctionName'
+  
+FunctionUrl:
+    Description: Function URL to invoke Lambda
+    Value: !Sub 'https://console.aws.amazon.com/lambda/home?region=${AWS::Region}#/functions/${ServerlessFunction}'
